@@ -95,6 +95,7 @@ func (h *Hourglass) NewTicker(duration time.Duration) (*Ticker, error) {
 	return &ticker, nil
 }
 
+// After duration will send a tick to Ticker
 func (h *Hourglass) After(duration time.Duration) (*Ticker, error) {
 	err := checkDuration(h.tickDuration, duration)
 	if err != nil {
@@ -111,6 +112,7 @@ func (h *Hourglass) After(duration time.Duration) (*Ticker, error) {
 	return &ticker, nil
 }
 
+// AfterFunc after duration func will be execution
 func (h *Hourglass) AfterFunc(duration time.Duration, f func(t time.Time)) error {
 	err := checkDuration(h.tickDuration, duration)
 	if err != nil {
@@ -127,6 +129,7 @@ func (h *Hourglass) AfterFunc(duration time.Duration, f func(t time.Time)) error
 	return nil
 }
 
+// After duration default hourglass will send a tick to Ticker
 func After(duration time.Duration) (*Ticker, error) {
 	err := checkDuration(hourglass.tickDuration, duration)
 	if err != nil {
@@ -143,6 +146,7 @@ func After(duration time.Duration) (*Ticker, error) {
 	return &ticker, nil
 }
 
+// AfterFunc default hourglass after duration func will be execution
 func AfterFunc(duration time.Duration, f func(t time.Time)) error {
 	err := checkDuration(hourglass.tickDuration, duration)
 	if err != nil {
