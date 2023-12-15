@@ -61,14 +61,15 @@ loop:
 // Ticker provide a time ticker like time.Ticker
 type Ticker struct {
 	duration time.Duration
-	c        chan time.Time
+	arg      any
+	f        func(arg any, t time.Time)
 	closed   bool
 	locker   sync.RWMutex
 }
 
 // C is channel of time.Time
 func (t *Ticker) C() <-chan time.Time {
-	return t.c
+	return t.arg.(chan time.Time)
 }
 
 // Close ticker
@@ -80,19 +81,82 @@ func (t *Ticker) Close() {
 
 // NewTicker make a ticker every duration from hourglass
 func (h *Hourglass) NewTicker(duration time.Duration) (*Ticker, error) {
-	if duration < h.tickDuration {
-		return nil, errors.New("duration must be grate than hourglass duration")
-	}
-	if duration%h.tickDuration != 0 {
-		return nil, errors.New("duration must be an integer multiple of the hourglass duration")
+	err := checkDuration(h.tickDuration, duration)
+	if err != nil {
+		return nil, err
 	}
 	ticker := Ticker{
 		duration: duration,
-		c:        make(chan time.Time, 1),
+		arg:      make(chan time.Time, 1),
+		f:        sendTime,
 		locker:   sync.RWMutex{},
 	}
 	h.rootWheel.setTicker(&ticker)
 	return &ticker, nil
+}
+
+func (h *Hourglass) After(duration time.Duration) (*Ticker, error) {
+	err := checkDuration(h.tickDuration, duration)
+	if err != nil {
+		return nil, err
+	}
+	ticker := Ticker{
+		duration: duration,
+		arg:      make(chan time.Time, 1),
+		f:        sendTime,
+		locker:   sync.RWMutex{},
+	}
+	defer ticker.Close()
+	h.rootWheel.setTicker(&ticker)
+	return &ticker, nil
+}
+
+func (h *Hourglass) AfterFunc(duration time.Duration, f func(t time.Time)) error {
+	err := checkDuration(h.tickDuration, duration)
+	if err != nil {
+		return err
+	}
+	ticker := Ticker{
+		duration: duration,
+		arg:      f,
+		f:        goFunc,
+		locker:   sync.RWMutex{},
+	}
+	defer ticker.Close()
+	h.rootWheel.setTicker(&ticker)
+	return nil
+}
+
+func After(duration time.Duration) (*Ticker, error) {
+	err := checkDuration(hourglass.tickDuration, duration)
+	if err != nil {
+		return nil, err
+	}
+	ticker := Ticker{
+		duration: duration,
+		arg:      make(chan time.Time, 1),
+		f:        sendTime,
+		locker:   sync.RWMutex{},
+	}
+	defer ticker.Close()
+	hourglass.rootWheel.setTicker(&ticker)
+	return &ticker, nil
+}
+
+func AfterFunc(duration time.Duration, f func(t time.Time)) error {
+	err := checkDuration(hourglass.tickDuration, duration)
+	if err != nil {
+		return err
+	}
+	ticker := Ticker{
+		duration: duration,
+		arg:      f,
+		f:        goFunc,
+		locker:   sync.RWMutex{},
+	}
+	defer ticker.Close()
+	hourglass.rootWheel.setTicker(&ticker)
+	return nil
 }
 
 // NewTicker make a ticker use default hourglass with  1 second tickDuration and 60 ticksPerWheel
@@ -120,6 +184,10 @@ func (w *wheel) setTicker(ticker *Ticker) {
 	w.locker.Lock()
 	defer w.locker.Unlock()
 	if ticker.closed {
+		val, ok := ticker.arg.(chan time.Time)
+		if ok {
+			close(val)
+		}
 		return
 	}
 	ticks := int(ticker.duration / w.tickDuration)
@@ -153,7 +221,7 @@ func (w *wheel) tick(t time.Time) {
 		go func(tk *Ticker) {
 			tk.locker.RLock()
 			defer tk.locker.RUnlock()
-			tk.c <- t
+			tk.f(tk.arg, t)
 			w.rootWheel().setTicker(tk)
 		}(ticker)
 		delete(w.tickers[w.currentTick], ticker)
@@ -172,4 +240,25 @@ func (w *wheel) rootWheel() *wheel {
 		return w
 	}
 	return w.prev.rootWheel()
+}
+
+func checkDuration(tickDuration, duration time.Duration) error {
+	if duration < tickDuration {
+		return errors.New("duration must be grate than hourglass duration")
+	}
+	if duration%tickDuration != 0 {
+		return errors.New("duration must be an integer multiple of the hourglass duration")
+	}
+	return nil
+}
+
+func sendTime(c any, t time.Time) {
+	select {
+	case c.(chan time.Time) <- t:
+	default:
+	}
+}
+
+func goFunc(f any, t time.Time) {
+	go f.(func(time.Time))(t)
 }
