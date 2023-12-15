@@ -39,8 +39,8 @@ func NewHourglass(tickDuration time.Duration, ticksPerWheel int) *Hourglass {
 	return &hourglass
 }
 
-// Stop hourglass
-func (h *Hourglass) Stop() {
+// Close hourglass
+func (h *Hourglass) Close() {
 	h.cancel()
 }
 
@@ -62,11 +62,20 @@ loop:
 type Ticker struct {
 	duration time.Duration
 	c        chan time.Time
+	closed   bool
+	locker   sync.RWMutex
 }
 
 // C is channel of time.Time
-func (t Ticker) C() <-chan time.Time {
+func (t *Ticker) C() <-chan time.Time {
 	return t.c
+}
+
+// Close ticker
+func (t *Ticker) Close() {
+	t.locker.Lock()
+	defer t.locker.Unlock()
+	t.closed = true
 }
 
 // NewTicker make a ticker every duration from hourglass
@@ -80,6 +89,7 @@ func (h *Hourglass) NewTicker(duration time.Duration) (*Ticker, error) {
 	ticker := Ticker{
 		duration: duration,
 		c:        make(chan time.Time, 1),
+		locker:   sync.RWMutex{},
 	}
 	h.rootWheel.setTicker(&ticker)
 	return &ticker, nil
@@ -109,6 +119,9 @@ type wheel struct {
 func (w *wheel) setTicker(ticker *Ticker) {
 	w.locker.Lock()
 	defer w.locker.Unlock()
+	if ticker.closed {
+		return
+	}
 	ticks := int(ticker.duration / w.tickDuration)
 	if ticks <= w.ticksPerWheel {
 		//insert into current wheel
@@ -138,6 +151,8 @@ func (w *wheel) tick(t time.Time) {
 	defer w.locker.Unlock()
 	for ticker := range w.tickers[w.currentTick] {
 		go func(tk *Ticker) {
+			tk.locker.RLock()
+			defer tk.locker.RUnlock()
 			tk.c <- t
 			w.rootWheel().setTicker(tk)
 		}(ticker)
